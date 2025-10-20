@@ -81,9 +81,9 @@ struct tree *tree_alloc (void) {
 
 void tree_add_child (struct tree *P, struct tree *C) {
   if (P->nc == P->size) {
-    void **t = talloc (sizeof (void *) * (++P->size));
-    memcpy (t, P->c, sizeof (void *) * (P->size - 1));
+    void **t = calloc (++P->size, sizeof (void *));
     if (P->c) {
+      memcpy (t, P->c, sizeof (void *) * (P->size - 1));
       tfree (P->c, sizeof (void *) * (P->size - 1));
     }
     P->c = (void *)t;
@@ -941,7 +941,7 @@ struct tree *tl_parse_lex (struct parse *_parse) {
 
 int mystrcmp2 (const char *b, int len, const char *a) {
   int c = strncmp (b, a, len);
-  return c ? a[len] ? -1 : 0 : c;
+  return c ? c : (a[len] ? -1 : 0);
 }
 
 char *mystrdup (const char *a, int len) {
