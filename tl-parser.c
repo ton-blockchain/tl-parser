@@ -389,28 +389,63 @@ int expect (char *s) {
 }
 
 struct parse *tl_init_parse_file (const char *fname) {
-  int fd = open (fname, O_RDONLY);
-  if (fd < 0) {
-    fprintf (stderr, "Error %m\n");
-    assert (0);
+  FILE *f = fopen(fname, "rb");
+  if (!f) {
+    fprintf(stderr, "Error opening file %s\n", fname);
+    assert(0);
     return 0;
   }
-  long long size = lseek (fd, 0, SEEK_END);
-  if (size <= 0) {
-    fprintf (stderr, "size is %lld. Too small.\n", size);
-    return 0;
-  }
+
   static struct parse save;
-  save.text = talloc (size);
-  lseek (fd, 0, SEEK_SET);
-  save.len = read (fd, save.text, size);
-  assert (save.len == size);
+  long long cap = 4096;
+  save.text = malloc(cap);
+  if (!save.text) {
+    fprintf(stderr, "malloc failed\n");
+    fclose(f);
+    assert(0);
+    return 0;
+  }
+
+  long long total = 0;
+  for (;;) {
+    if (total == cap) {
+      long long newcap = (long long)(cap * 1.5);
+      char *newbuf = realloc(save.text, newcap);
+      if (!newbuf) {
+        fprintf(stderr, "realloc failed\n");
+        free(save.text);
+        fclose(f);
+        assert(0);
+        return 0;
+      }
+      save.text = newbuf;
+      cap = newcap;
+    }
+
+    size_t n = fread(save.text + total, 1, cap - total, f);
+    if (n == 0) {
+      if (ferror(f)) {
+        fprintf(stderr, "read error\n");
+        free(save.text);
+        fclose(f);
+        assert(0);
+        return 0;
+      }
+      break; // EOF
+    }
+    total += n;
+  }
+
+  save.len = total;
+
   save.pos = 0;
   save.line = 0;
   save.line_pos = 0;
   save.lex.ptr = save.text;
   save.lex.len = 0;
   save.lex.type = lex_none;
+
+  fclose(f);
   return &save;
 }
 
