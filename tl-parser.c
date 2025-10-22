@@ -23,9 +23,11 @@
 */
 
 #define _FILE_OFFSET_BITS 64
-#include "config.h"
 
+#ifndef _WIN32
 #include <unistd.h>
+#endif
+
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -34,12 +36,11 @@
 #include <assert.h>
 #include <string.h>
 #include <time.h>
-#include <zlib.h>
 #include "portable_endian.h"
 #include "tl-parser-tree.h"
 #include "tl-parser.h"
+#include "crc32.h"
 #include "tl-tl.h"
-#include "config.h"
 
 extern int verbosity;
 extern int schema_version;
@@ -78,13 +79,11 @@ struct tree *tree_alloc (void) {
   return T;
 }
 
-#define CRC32_INITIAL crc32 (0, 0, 0)
-
 void tree_add_child (struct tree *P, struct tree *C) {
   if (P->nc == P->size) {
-    void **t = talloc (sizeof (void *) * (++P->size));
-    memcpy (t, P->c, sizeof (void *) * (P->size - 1));
+    void **t = calloc (++P->size, sizeof (void *));
     if (P->c) {
+      memcpy (t, P->c, sizeof (void *) * (P->size - 1));
       tfree (P->c, sizeof (void *) * (P->size - 1));
     }
     P->c = (void *)t;
@@ -241,8 +240,58 @@ char *parse_lex (void) {
     parse.lex.len = 1;
     parse.lex.type = lex_char;   
     return (parse.lex.ptr = p);
-  case 'a'...'z':
-  case 'A'...'Z':
+  case 'a':
+  case 'b':
+  case 'c':
+  case 'd':
+  case 'e':
+  case 'f':
+  case 'g':
+  case 'h':
+  case 'i':
+  case 'j':
+  case 'k':
+  case 'l':
+  case 'm':
+  case 'n':
+  case 'o':
+  case 'p':
+  case 'q':
+  case 'r':
+  case 's':
+  case 't':
+  case 'u':
+  case 'v':
+  case 'w':
+  case 'x':
+  case 'y':
+  case 'z':
+  case 'A':
+  case 'B':
+  case 'C':
+  case 'D':
+  case 'E':
+  case 'F':
+  case 'G':
+  case 'H':
+  case 'I':
+  case 'J':
+  case 'K':
+  case 'L':
+  case 'M':
+  case 'N':
+  case 'O':
+  case 'P':
+  case 'Q':
+  case 'R':
+  case 'S':
+  case 'T':
+  case 'U':
+  case 'V':
+  case 'W':
+  case 'X':
+  case 'Y':
+  case 'Z':
     parse.lex.flags = 0;
     if (is_uletter (curch)) {
       while (is_ident_char (nextch ()));
@@ -305,7 +354,16 @@ char *parse_lex (void) {
     parse.lex.len = parse.text + parse.pos - p;
     parse.lex.type = lex_lc_ident;
     return (parse.lex.ptr = p);
-  case '0'...'9':
+  case '0':
+  case '1':
+  case '2':
+  case '3':
+  case '4':
+  case '5':
+  case '6':
+  case '7':
+  case '8':
+  case '9':
     while (is_digit (nextch ()));
     parse.lex.len = parse.text + parse.pos - p;
     parse.lex.type = lex_num;
@@ -331,28 +389,63 @@ int expect (char *s) {
 }
 
 struct parse *tl_init_parse_file (const char *fname) {
-  int fd = open (fname, O_RDONLY);
-  if (fd < 0) {
-    fprintf (stderr, "Error %m\n");
-    assert (0);
+  FILE *f = fopen(fname, "rb");
+  if (!f) {
+    fprintf(stderr, "Error opening file %s\n", fname);
+    assert(0);
     return 0;
   }
-  long long size = lseek (fd, 0, SEEK_END);
-  if (size <= 0) {
-    fprintf (stderr, "size is %lld. Too small.\n", size);
-    return 0;
-  }
+
   static struct parse save;
-  save.text = talloc (size);
-  lseek (fd, 0, SEEK_SET);
-  save.len = read (fd, save.text, size);
-  assert (save.len == size);
+  long long cap = 4096;
+  save.text = malloc(cap);
+  if (!save.text) {
+    fprintf(stderr, "malloc failed\n");
+    fclose(f);
+    assert(0);
+    return 0;
+  }
+
+  long long total = 0;
+  for (;;) {
+    if (total == cap) {
+      long long newcap = (long long)(cap * 1.5);
+      char *newbuf = realloc(save.text, newcap);
+      if (!newbuf) {
+        fprintf(stderr, "realloc failed\n");
+        free(save.text);
+        fclose(f);
+        assert(0);
+        return 0;
+      }
+      save.text = newbuf;
+      cap = newcap;
+    }
+
+    size_t n = fread(save.text + total, 1, cap - total, f);
+    if (n == 0) {
+      if (ferror(f)) {
+        fprintf(stderr, "read error\n");
+        free(save.text);
+        fclose(f);
+        assert(0);
+        return 0;
+      }
+      break; // EOF
+    }
+    total += n;
+  }
+
+  save.len = total;
+
   save.pos = 0;
   save.line = 0;
   save.line_pos = 0;
   save.lex.ptr = save.text;
   save.lex.len = 0;
   save.lex.type = lex_none;
+
+  fclose(f);
   return &save;
 }
 
@@ -883,7 +976,7 @@ struct tree *tl_parse_lex (struct parse *_parse) {
 
 int mystrcmp2 (const char *b, int len, const char *a) {
   int c = strncmp (b, a, len);
-  return c ? a[len] ? -1 : 0 : c;
+  return c ? c : (a[len] ? -1 : 0);
 }
 
 char *mystrdup (const char *a, int len) {
@@ -1412,7 +1505,7 @@ int tl_count_combinator_name (struct tl_constructor *c) {
   tl_buf_add_tree (c->right, 1);
   //fprintf (stderr, "%.*s\n", buf_pos, buf);
   if (!c->name) {
-    c->name = crc32 (CRC32_INITIAL, (void *) buf, buf_pos);
+    c->name = compute_crc32 (buf, buf_pos);
   }
   return c->name;
 }
@@ -1430,7 +1523,7 @@ int tl_print_combinator (struct tl_constructor *c) {
     fprintf (stderr, "%.*s\n", buf_pos, buf);
   }
 /*  if (!c->name) {
-    c->name = crc32 (CRC32_INITIAL, (void *) bbuf, buf_pos);
+    c->name = compute_crc32 (buf, buf_pos);
   }*/
   return c->name;
 }
