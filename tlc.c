@@ -146,7 +146,7 @@ int main (int argc, char **argv) {
   if (!(T = tl_parse_lex (P))) {
     fprintf (stderr, "Error in parse:\n");
     tl_print_parse_error ();
-    return 0;
+    return 1;
   } else {
     if (verbosity) {
       fprintf (stderr, "Parse ok\n");
